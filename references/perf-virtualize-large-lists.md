@@ -1,35 +1,43 @@
 ---
-title: 虛擬化大型列表以避免 DOM 過載
+title: 透過「列表虛擬化」避免 DOM 負擔過重
 impact: HIGH
-impactDescription: 渲染數千個列表項目會建立過多 DOM 節點，導致緩慢渲染和高記憶體使用
-type: efficiency
+impactDescription: 當一次性渲染成千上萬個列表項目時，會產生過多的 DOM 節點，導致渲染速度變慢、記憶體佔用過高，甚至可能使頁面卡頓。
 tags: [vue3, performance, virtual-list, large-data, dom, optimization]
 ---
 
-# 虛擬化大型列表以避免 DOM 過載
+# 透過「列表虛擬化」避免 DOM 負擔過重
 
-**影響：HIGH** - 在大型列表中渲染所有項目（數百或數千個）會建立大量 DOM 節點。每個節點消耗記憶體、減慢初始渲染，並使更新代價高昂。列表虛擬化只渲染可見項目，大幅改善性能。
+**影響：高 (HIGH)**
 
-處理可能超過 50-100 個項目的列表時使用虛擬化庫，特別是當項目有複雜內容時。
+當一個列表包含數百甚至數千個項目時，若使用傳統的 `v-for` 進行渲染，會一次性地將所有項目都生成為 DOM 節點。每一個 DOM 節點都會消耗記憶體、拖慢頁面的初始渲染速度，並使得後續的任何更新都變得代價高昂。
 
-## 任務清單
+「列表虛擬化」 (List Virtualization) 是一種僅渲染當前可視範圍內項目的技術，它能極大地提升處理長列表時的應用程式效能。
 
-- 辨識渲染超過 50-100 個項目的列表
-- 安裝虛擬化庫（vue-virtual-scroller、@tanstack/vue-virtual）
-- 用虛擬化元件替換標準 `v-for`
-- 確保列表項目有一致或可估計的高度
-- 在開發過程中使用實際數據量進行測試
+**核心建議：** 當列表的項目數量可能超過 50-100 項時，特別是當每個項目都包含複雜內容時，就應該考慮使用列表虛擬化技術。
 
-## 推薦的庫
+## 檢查清單
 
-| 庫 | 最適合 | 備註 |
-|------|----------|-------|
-| `vue-virtual-scroller` | 通用、易於設置 | 最受歡迎、預設值良好 |
-| `@tanstack/vue-virtual` | 複雜佈局、無界面庫 | 與框架無關、靈活 |
-| `vue-virtual-scroll-grid` | 網格佈局 | 2D 虛擬化 |
-| `vueuc/VVirtualList` | Naive UI 專案 | Naive UI 生態系統的一部分 |
+-   找出應用中所有可能渲染超過 50-100 個項目的列表。
+-   選擇並安裝一個合適的列表虛擬化函式庫 (例如 `vue-virtual-scroller` 或 `@tanstack/vue-virtual`)。
+-   使用虛擬化元件來取代標準的 `v-for` 迴圈。
+-   確保列表中的每個項目都具有一致或可預估的高度 (這是虛擬化計算的基礎)。
+-   在開發過程中，使用接近真實場景的數據量來進行測試和驗證。
 
-**不好的：**
+## 推薦的函式庫
+
+| 函式庫 | 最適用場景 | 備註 |
+|---|---|---|
+| `vue-virtual-scroller` | 通用，設定簡單 | 社群最流行，預設功能完善，上手快。 |
+| `@tanstack/vue-virtual` | 複雜佈局，無預設樣式 | 又稱為 "Headless" 函式庫，與框架解耦，提供極高靈活性。 |
+| `vue-virtual-scroll-grid` | 網格 (Grid) 佈局 | 專為二維滾動場景設計。 |
+| `vueuc/VVirtualList` | Naive UI 專案 | 若您已在使用 Naive UI，這是最自然的選擇。 |
+
+---
+
+**不好的範例：**
+
+一次性渲染全部 10,000 個項目，會產生大量 DOM 節點，極易導致瀏覽器回應緩慢或凍結。
+
 ```vue
 <template>
   <!-- 不好：立即渲染所有 10,000 個項目 -->
@@ -44,21 +52,23 @@ tags: [vue3, performance, virtual-list, large-data, dom, optimization]
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import UserCard from './UserCard.vue'
 
 const users = ref([])
 
 onMounted(async () => {
-  // 建立 10,000 個 DOM 節點，瀏覽器掙扎
-  users.value = await fetchAllUsers()
+  // 這一步將會一次性建立 10,000 個 DOM 節點，對瀏覽器造成巨大壓力
+  users.value = await fetchAllUsers() // 假設返回 10,000 筆資料
 })
 </script>
 ```
 
-**好的：**
+**好的範例：**
+
+使用 `vue-virtual-scroller`，無論總項目有多少，DOM 中始終只維持 20 個左右的節點。
+
 ```vue
 <template>
-  <!-- 好的：一次只渲染 ~20 個可見項目 -->
+  <!-- 好：一次只渲染約 20 個可見項目 -->
   <RecycleScroller
     class="user-list"
     :items="users"
@@ -74,34 +84,33 @@ onMounted(async () => {
 import { ref, onMounted } from 'vue'
 import { RecycleScroller } from 'vue-virtual-scroller'
 import 'vue-virtual-scroller/dist/vue-virtual-scroller.css'
-import UserCard from './UserCard.vue'
 
 const users = ref([])
 
 onMounted(async () => {
-  // 10,000 個項目在記憶體中，但僅 ~20 個 DOM 節點
+  // 10,000 筆資料存在於記憶體中，但 DOM 中只會建立約 20 個節點
   users.value = await fetchAllUsers()
 })
 </script>
 
 <style scoped>
 .user-list {
-  height: 600px; /* 容器必須有固定高度 */
+  /* 關鍵：虛擬滾動的容器必須具有一個明確的高度 */
+  height: 600px;
 }
 </style>
 ```
 
-## 使用 @tanstack/vue-virtual
+## 範例：使用 `@tanstack/vue-virtual`
+
+這個函式庫提供了更底層的控制，讓您可以自訂滾動的容器和項目結構。
 
 ```vue
 <template>
   <div ref="parentRef" class="list-container">
-    <div
-      :style="{
-        height: `${rowVirtualizer.getTotalSize()}px`,
-        position: 'relative'
-      }"
-    >
+    <!-- 總高度由虛擬器計算得出，用於產生正確的滾動條 -->
+    <div :style="{ height: `${rowVirtualizer.getTotalSize()}px`, position: 'relative' }">
+      <!-- 僅渲染可見的項目 -->
       <div
         v-for="virtualRow in rowVirtualizer.getVirtualItems()"
         :key="virtualRow.key"
@@ -124,30 +133,32 @@ onMounted(async () => {
 import { ref } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 
-const users = ref([/* 10,000 個使用者 */])
+const users = ref([/*...10,000 個使用者...*/])
 const parentRef = ref(null)
 
 const rowVirtualizer = useVirtualizer({
   count: users.value.length,
   getScrollElement: () => parentRef.value,
-  estimateSize: () => 80,  // 估計行高
-  overscan: 5  // 在視口上方/下方渲染 5 個額外項目
+  estimateSize: () => 80,  // 提供一個預估的行高
+  overscan: 5  // 在可視範圍的上方和下方額外渲染 5 個項目，以減少滾動時的白屏
 })
 </script>
 
 <style scoped>
 .list-container {
   height: 600px;
-  overflow: auto;
+  overflow: auto; /* 容器自身負責滾動 */
 }
 </style>
 ```
 
-## 使用 vue-virtual-scroller 處理動態高度
+## 處理動態高度的項目
+
+如果列表項目的高度不固定（例如聊天訊息），`vue-virtual-scroller` 提供了 `DynamicScroller` 元件。
 
 ```vue
 <template>
-  <!-- 對於可變高度項目，使用 DynamicScroller -->
+  <!-- 對於高度可變的項目，使用 DynamicScroller -->
   <DynamicScroller
     :items="messages"
     :min-item-size="54"
@@ -164,24 +175,22 @@ const rowVirtualizer = useVirtualizer({
     </template>
   </DynamicScroller>
 </template>
-
-<script setup>
-import { DynamicScroller, DynamicScrollerItem } from 'vue-virtual-scroller'
-</script>
 ```
 
-## 性能比較
+## 效能對比
 
-| 方式 | 100 個項目 | 1,000 個項目 | 10,000 個項目 |
-|----------|-----------|-------------|--------------|
-| 常規 v-for | ~100 個 DOM 節點 | ~1,000 個 DOM 節點 | ~10,000 個 DOM 節點 |
-| 虛擬化 | ~20 個 DOM 節點 | ~20 個 DOM 節點 | ~20 個 DOM 節點 |
-| 初始渲染 | 快速 | 緩慢 | 非常緩慢 / 當機 |
-| 虛擬化渲染 | 快速 | 快速 | 快速 |
+| 渲染方式 | 100 項目 | 1,000 項目 | 10,000 項目 |
+|---|---|---|---|
+| 一般 `v-for` | ~100 DOM 節點 | ~1,000 DOM 節點 | ~10,000 DOM 節點 |
+| **虛擬化** | **~20 DOM 節點** | **~20 DOM 節點** | **~20 DOM 節點** |
+| 初始渲染時間 (v-for) | 快 | 慢 | 非常慢 / 可能崩潰 |
+| 初始渲染時間 (虛擬化) | **快** | **快** | **快** |
 
-## 何時不應虛擬化
+## 何時不該使用虛擬化
 
-- 包含簡單內容的少於 50 個項目的列表
-- 列表中所有項目必須同時可供螢幕閱讀器存取的列表
-- 所有內容必須渲染的列印佈局
-- 必須在初始 HTML 中包含的 SEO 關鍵內容
+列表虛擬化並非萬靈丹，在以下場景中應避免使用：
+
+-   **短列表**：當列表項目少於 50 個且內容簡單時，引入虛擬化的複雜性得不償失。
+-   **可訪問性 (Accessibility)**：如果所有項目必須同時對螢幕閱讀器等輔助技術可見。
+-   **列印佈局**：當頁面需要被列印時，所有內容都必須完整渲染出來。
+-   **SEO 關鍵內容**：如果列表內容對於搜尋引擎優化至關重要，需要確保它們存在於初始的 HTML 中。

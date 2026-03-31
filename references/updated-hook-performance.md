@@ -1,29 +1,38 @@
 ---
-title: 避免在 Updated 鉤子中進行昂貴的操作
+title: 避免在 updated 生命週期鉤子中執行昂貴操作
 impact: MEDIUM
-impactDescription: 在 updated 鉤子中的繁重計算會導致性能瓶頸和潛在的無限迴圈
-type: capability
+impactDescription: 在 updated 鉤子中執行耗時的計算或 I/O 操作，不僅會拖慢效能，還極易引發無限更新迴圈。
 tags: [vue3, vue2, lifecycle, updated, performance, optimization, reactivity]
 ---
 
-# 避免在 Updated 鉤子中進行昂貴的操作
+# 避免在 updated 生命週期鉤子中執行昂貴操作
 
-**影響：MEDIUM** - `updated` 鉤子在導致重新渲染的每次反應性狀態改變後運行。在此處放置昂貴的操作、API 呼叫或狀態變更可能導致嚴重性能下降、無限迴圈和掉幀至最佳 60fps 閾值以下。
+**影響：中等 (MEDIUM)**
 
-謹慎使用 `updated`/`onUpdated` 處理無法由監視器或計算屬性處理的 DOM 後更新操作。對於大多數反應性數據處理，偏好監視器（`watch`/`watchEffect`），它們對觸發回調的內容提供更多控制。
+`updated` (或 Composition API 中的 `onUpdated`) 鉤子會在每一次因響應式狀態變更而觸發重新渲染後執行。這意味著它是一個非常敏感且執行頻繁的函式。
 
-## 任務清單
+在此鉤子中放置昂貴的操作 (如 API 請求、複雜計算) 或會再次修改狀態的程式碼，極易導致以下問題：
+- **效能下降**：每次更新都觸發耗時操作，可能導致頁面掉幀，無法達到流暢的 60fps。
+- **無限迴圈**：如果在 `updated` 中修改了響應式狀態，會觸發另一次更新，從而再次呼叫 `updated`，形成死循環。
 
-- 永遠不要在 updated 鉤子中進行 API 呼叫
-- 永遠不要在 updated 內部變更反應性狀態（會導致無限迴圈）
-- 在操作之前使用條件檢查來驗證更新是否相關
-- 對於回應特定數據改變，偏好 `watch` 或 `watchEffect`
-- 如果 updated 操作很昂貴，使用節流/防波
-- 保留 updated 用於低階 DOM 同步任務
+`updated` 鉤子的主要用途是處理那些**必須在 DOM 更新後**才能執行的操作，且這些操作無法透過 `watch` 或 `computed` 來完成。對於絕大多數的數據監聽與響應，**應優先使用 `watch`**，因為它能提供更精確、更可控的觸發條件。
 
-**不好的：**
+## 檢查清單
+
+-   **絕對不要**在 `updated` 鉤子中直接發起 API 請求。
+-   **絕對不要**在 `updated` 鉤子中直接修改響應式狀態，以防無限迴圈。
+-   如果必須在 `updated` 中執行操作，請務必加入條件檢查，確保只在必要時執行。
+-   優先使用 `watch` 或 `watchEffect` 來響應**特定**數據的變化。
+-   如果 `updated` 中的操作確實無法避免且較為昂貴，考慮使用 `debounce` (防抖) 或 `throttle` (節流) 進行效能控制。
+-   將 `updated` 的使用場景限制在與 DOM 同步相關的底層任務上。
+
+---
+
+**不好的範例：**
+
 ```javascript
-// 不好：updated 中的 API 呼叫 - 在每次重新渲染時觸發
+// 錯誤 1：在 updated 中發起 API 請求
+// 這會在每一次重新渲染後都觸發 API 請求，造成資源浪費和不必要的後端壓力。
 export default {
   data() {
     return { items: [], lastUpdate: null }
@@ -39,148 +48,147 @@ export default {
 ```
 
 ```javascript
-// 不好：updated 中的狀態變更 - 無限迴圈
+// 錯誤 2：在 updated 中修改狀態，導致無限迴圈
 export default {
   data() {
-    return { renderCount: 0 }
+    return { renderCount: 0 };
   },
   updated() {
-    // 此導致另一次更新，這觸發 updated 再次！
-    this.renderCount++ // 無限迴圈
+    // 1. 狀態改變，觸發 updated
+    // 2. this.renderCount++ 再次改變狀態
+    // 3. 觸發另一次更新 -> 再次呼叫 updated -> 無限迴圈...
+    this.renderCount++;
   }
 }
 ```
 
 ```javascript
-// 不好：每次更新時的繁重計算
+// 錯誤 3：在 updated 中執行昂貴的計算
+// 任何微小的狀態變化（例如使用者在輸入框中打一個字）都會觸發此昂貴計算。
 export default {
   updated() {
-    // 昂貴的操作在每次按鍵、每次狀態改變時運行
-    this.processedData = this.heavyComputation(this.rawData)
-    this.analytics = this.calculateMetrics(this.allData)
+    this.processedData = this.heavyComputation(this.rawData);
   }
 }
 ```
 
-**好的：**
-```javascript
-import debounce from 'lodash-es/debounce'
+---
 
-// 好的：為特定數據改變使用監視器
+**好的範例：**
+
+**1. 使用 `watch` 監聽特定數據的變化**
+
+這是最推薦的替代方案。`watch` 只在被監聽的數據源發生變化時才會執行。
+
+```javascript
+// Options API 寫法
 export default {
-  data() {
-    return { items: [] }
-  },
   watch: {
-    // 僅當 items 實際改變時觸發
+    // 僅在 `items` 實際改變時才觸發
     items: {
       handler(newItems) {
-        this.syncToServer(newItems)
+        this.syncToServer(newItems);
       },
-      deep: true
+      deep: true // 深度監聽，適用於物件或陣列
     }
   },
   methods: {
+    // 使用 debounce (防抖) 來避免過於頻繁地觸發
     syncToServer: debounce(function(items) {
-      fetch('/api/sync', {
-        method: 'POST',
-        body: JSON.stringify(items)
-      })
+      fetch('/api/sync', { /* ... */ });
     }, 500)
   }
 }
 ```
 
+**2. Composition API 的寫法**
+
+Composition API 提供了更靈活的 `watch` 和 `onUpdated` 組合。
+
 ```vue
-<!-- 好的：搭配目標監視器的 Composition API -->
 <script setup>
-import { ref, watch, onUpdated } from 'vue'
-import { useDebounceFn } from '@vueuse/core'
+import { ref, watch, onUpdated } from 'vue';
+import { useDebounceFn } from '@vueuse/core';
 
-const items = ref([])
-const scrollContainer = ref(null)
+const items = ref([]);
+const scrollContainer = ref(null);
 
-// 監視特定數據 - 不是所有更新
+// 方案一：監聽特定數據變化，執行邏輯
 watch(items, (newItems) => {
-  syncToServer(newItems)
-}, { deep: true })
+  syncToServer(newItems);
+}, { deep: true });
 
 const syncToServer = useDebounceFn((items) => {
-  fetch('/api/sync', { method: 'POST', body: JSON.stringify(items) })
-}, 500)
+  fetch('/api/sync', { /* ... */ });
+}, 500);
 
-// 僅為 DOM 同步使用 onUpdated
+// 方案二：僅在必要時，為 DOM 同步操作使用 onUpdated
 onUpdated(() => {
-  // 如果內容改變高度，僅滾動到底部
+  // 例如：當聊天室內容更新後，自動滾動到底部
   if (scrollContainer.value) {
-    scrollContainer.value.scrollTop = scrollContainer.value.scrollHeight
+    scrollContainer.value.scrollTop = scrollContainer.value.scrollHeight;
   }
-})
+});
 </script>
 ```
 
+**3. 在 `updated` 中加入條件檢查**
+
+如果實在無法避免，務必加入條件判斷，以防止不必要的執行。
+
 ```javascript
-// 好的：updated 鉤子中的條件檢查
 export default {
-  data() {
-    return {
-      content: '',
-      lastSyncedContent: ''
-    }
-  },
   updated() {
-    // 僅在滿足特定條件時操作
+    // 僅在 content 的值確實發生了變化時才執行同步
     if (this.content !== this.lastSyncedContent) {
-      this.syncContent()
-      this.lastSyncedContent = this.content
+      this.syncContent();
+      this.lastSyncedContent = this.content;
     }
   },
   methods: {
-    syncContent: debounce(function() {
-      // 同步邏輯
-    }, 300)
+    syncContent: debounce(function() { /* ... */ }, 300)
   }
 }
 ```
 
-## Updated 鉤子的有效使用情況
+## `updated` 鉤子的合理使用場景
+
+-   **與第三方函式庫的 DOM 同步**：當您使用一個不基於 Vue 的函式庫（例如圖表庫、地圖庫）時，可能需要在 Vue 更新 DOM 後，手動呼叫該函式庫的 refresh 或 update 方法。
+-   **手動的 DOM 操作**：例如，在 DOM 更新後計算元素尺寸、位置，或手動調整滾動條位置。
 
 ```javascript
-// 好的：低階 DOM 同步
 export default {
   updated() {
-    // 將第三方庫與 Vue 的 DOM 同步
-    this.thirdPartyWidget.refresh()
+    // 在 Vue 更新 DOM 後，通知第三方小工具進行刷新
+    this.thirdPartyWidget.refresh();
 
-    // 內容改變後更新滾動位置
+    // 在下次 DOM 更新循環結束後，執行滾動位置維護
     this.$nextTick(() => {
-      this.maintainScrollPosition()
-    })
+      this.maintainScrollPosition();
+    });
   }
 }
 ```
 
-## 對推導數據偏好計算屬性
+## 衍生數據應使用 `computed`
+
+**絕對不要**在 `updated` 鉤子中計算衍生數據，這不僅效能低下，還可能觸發無限迴圈。請使用 `computed` 屬性。
 
 ```javascript
-// 不好：在 updated 中計算推導數據
+// 不好的示範
 export default {
-  data() {
-    return { numbers: [1, 2, 3, 4, 5] }
-  },
   updated() {
-    this.sum = this.numbers.reduce((a, b) => a + b, 0) // 導致另一次更新！
+    // 錯誤！這會修改 `this.sum`，從而觸發另一次更新！
+    this.sum = this.numbers.reduce((a, b) => a + b, 0);
   }
 }
 
-// 好的：改用計算屬性
+// 正確的示範：使用 computed 屬性
 export default {
-  data() {
-    return { numbers: [1, 2, 3, 4, 5] }
-  },
   computed: {
+    // `sum` 會在 `numbers` 改變時自動且高效地重新計算
     sum() {
-      return this.numbers.reduce((a, b) => a + b, 0)
+      return this.numbers.reduce((a, b) => a + b, 0);
     }
   }
 }
